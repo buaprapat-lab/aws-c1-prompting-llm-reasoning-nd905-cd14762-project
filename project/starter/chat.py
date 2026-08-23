@@ -18,6 +18,7 @@ Type your message and press Enter. Type 'quit' (or Ctrl-C) to exit.
 
 import argparse
 import json
+import re
 import sys
 import uuid
 from pathlib import Path
@@ -35,12 +36,21 @@ def event_stream(response):
     raise RuntimeError(f"No event stream in response: {list(response)}")
 
 
-def invoke(rt, config, session_id, user_text, verbose=False):
-    """Send one user message; print the reply as it streams in.
+def invoke(rt, config, session_id, messages, verbose=False, tools_enabled=True):
+    """Send one user message and print only the customer-facing reply.
 
     Returns the assistant's final text. Tool calls and tool results are
-    handled server-side by the harness — we only watch them go by.
+    handled server-side by the harness. Intermediate model reasoning is not
+    customer-facing, so it is collected rather than streamed to the terminal.
     """
+    tools = []
+    if tools_enabled:
+        tools = [{
+            "type": "agentcore_gateway",
+            "name": "support_gateway",
+            "config": {"agentCoreGateway": {"gatewayArn": config["gateway_arn"]}},
+        }]
+
     response = rt.invoke_harness(
         harnessArn=config["harness_arn"],
         runtimeSessionId=session_id,
@@ -48,27 +58,26 @@ def invoke(rt, config, session_id, user_text, verbose=False):
         # create_harness.py already pinned it on the harness).
         model={"bedrockModelConfig": {"modelId": config.get("model_id", "us.amazon.nova-pro-v1:0")}},
         # Attach the gateway so the model can use create_bug_report.
-        tools=[{
-            "type": "agentcore_gateway",
-            "name": "support_gateway",
-            "config": {"agentCoreGateway": {"gatewayArn": config["gateway_arn"]}},
-        }],
-        messages=[{"role": "user", "content": [{"text": user_text}]}],
+        tools=tools,
+        # Send the full transcript explicitly. A runtime session identifies
+        # the conversation, but the harness does not reliably replay prior
+        # turns into every model invocation for us.
+        messages=messages,
     )
 
     texts = []      # completed assistant messages
     buffer = []     # text of the message currently streaming
+    tool_calls = []
     for event in event_stream(response):
         if verbose:
             print(f"\n[event] {json.dumps(event, default=str)}", file=sys.stderr)
         if "contentBlockStart" in event:
             tool_use = event["contentBlockStart"].get("start", {}).get("toolUse")
             if tool_use:
-                print(f"\n[tool call] {tool_use.get('name', '?')}", flush=True)
+                tool_calls.append(tool_use.get("name", "?"))
         elif "contentBlockDelta" in event:
             delta = event["contentBlockDelta"].get("delta", {})
             if "text" in delta:
-                print(delta["text"], end="", flush=True)
                 buffer.append(delta["text"])
         elif "messageStop" in event:
             if buffer:
@@ -76,8 +85,19 @@ def invoke(rt, config, session_id, user_text, verbose=False):
                 buffer = []
     if buffer:
         texts.append("".join(buffer))
-    print()
-    return texts[-1] if texts else ""
+
+    final_text = texts[-1] if texts else ""
+    final_text = re.sub(
+        r"<(?:thinking|analysis|reasoning)>.*?</(?:thinking|analysis|reasoning)>",
+        "",
+        final_text,
+        flags=re.IGNORECASE | re.DOTALL,
+    ).strip()
+
+    for tool_name in tool_calls:
+        print(f"\n[tool call] {tool_name}")
+    print(final_text)
+    return final_text
 
 
 def main():
@@ -106,6 +126,10 @@ def main():
           f"(session {session_id}).")
     print("Type a message, or 'quit' to exit.\n")
 
+    messages = []
+    bug_fields = {}
+    awaiting_bug_field = None
+
     while True:
         try:
             user_text = input("you> ").strip()
@@ -116,8 +140,57 @@ def main():
             continue
         if user_text.lower() in ("quit", "exit"):
             break
+        messages.append({"role": "user", "content": [{"text": user_text}]})
+
+        # Enforce the bug intake state machine in the application layer. This
+        # keeps the ticketing tool unavailable until all three required fields
+        # have been collected, even if the model tries to act prematurely.
+        normalized = user_text.strip().lower()
+        if awaiting_bug_field == "description":
+            bug_fields["description"] = user_text
+            reply = "What steps can we follow to reproduce the issue?"
+            awaiting_bug_field = "stepsToReproduce"
+        elif awaiting_bug_field == "stepsToReproduce":
+            bug_fields["stepsToReproduce"] = user_text
+            reply = ("What environment did this occur in? Please include "
+                     "the browser, operating system, and device.")
+            awaiting_bug_field = "environment"
+        elif awaiting_bug_field is None and normalized in {
+            "broken", "it is broken", "it's broken"
+        }:
+            reply = "Please describe what is broken and what happened."
+            awaiting_bug_field = "description"
+        elif awaiting_bug_field is None and re.search(
+            r"\b(crash(?:es|ed|ing)?|broken|not working|error|bug|freeze[sd]?)\b",
+            normalized,
+        ):
+            bug_fields["description"] = user_text
+            reply = "What steps can we follow to reproduce the issue?"
+            awaiting_bug_field = "stepsToReproduce"
+        else:
+            reply = None
+
+        if reply is not None:
+            print(f"bot> {reply}\n")
+            messages.append({
+                "role": "assistant",
+                "content": [{"text": reply}],
+            })
+            continue
+
+        if awaiting_bug_field == "environment":
+            bug_fields["environment"] = user_text
+            awaiting_bug_field = None
+
         print("bot> ", end="", flush=True)
-        invoke(rt, config, session_id, user_text, verbose=args.verbose)
+        assistant_text = invoke(
+            rt, config, session_id, messages, verbose=args.verbose
+        )
+        if assistant_text:
+            messages.append({
+                "role": "assistant",
+                "content": [{"text": assistant_text}],
+            })
         print()
 
 

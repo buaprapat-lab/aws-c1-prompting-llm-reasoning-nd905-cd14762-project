@@ -23,6 +23,17 @@ The current implementation uses these AgentCore equivalents for the original Bed
 
 The `screenshots/` directory contains evidence of the ready harness, ready Gateway target, `create_bug_report` tool schema, and deployed Lambda application.
 
+### Submission Evidence
+
+| Evidence | Files |
+|---|---|
+| AgentCore Harness and Gateway | `screenshots/Bedrock_AgentCore.png`, `screenshots/agentcore_gateway3.png`, `screenshots/agentcore_tool.png` |
+| Bug-report conversation and persisted ticket | `screenshots/case1_bug_report_transcript.png`, `screenshots/case1_dynamodb_bug_report.png` |
+| FAQ and unsupported-request paths | `screenshots/faq_answer.png`, `screenshots/faq_fallback.png`, `screenshots/other_request.png` |
+| Generated evaluation dataset | `starter/output_eval_dataset.jsonl`, `screenshots/output_eval_dataset.png` |
+| Bedrock LLM-as-a-judge results | `screenshots/bedrock_evaluation_results1.png` through `screenshots/bedrock_evaluation_results4.png` |
+| Evaluation analysis | `starter/EVALUATION_OBSERVATIONS.md` |
+
 There are a number of resources available to you to develop this application:
 
 * `create_bug_report` — a tool (Lambda function) that creates a ticket in a database, exposed to your chatbot through an **AgentCore Gateway**

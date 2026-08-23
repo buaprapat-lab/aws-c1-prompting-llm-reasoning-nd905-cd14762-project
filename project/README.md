@@ -10,6 +10,19 @@ The centerpiece of the project is **prompt engineering**: all of the routing, in
 
 > **Why AgentCore?** Bedrock *Agents Classic* was closed to new customers on July 30, 2026, so this course uses its successor, the AgentCore managed harness. Bedrock Evaluations — which you'll use for testing — is unaffected.
 
+## Project Version Note
+
+This submission follows the current AgentCore-based starter repository and project instructions. AWS no longer allows new users to access Bedrock Agents (Classic), and Udacity Support directed students to use Amazon Bedrock AgentCore instead.
+
+The current implementation uses these AgentCore equivalents for the original Bedrock Agents and Flows concepts:
+
+- Classification and routing are defined by the `BUG REPORT`, `PLATFORM QUESTION`, and `ANYTHING ELSE` workflows in `system_prompt.txt`.
+- The AgentCore managed harness `support_chatbot` runs the agent and maintains the conversation state.
+- The AgentCore Gateway exposes the Lambda-backed `create_bug_report` tool to the harness.
+- The bug-report Lambda and DynamoDB resources are deployed by the `bug-report-tool-stack` CloudFormation application.
+
+The `screenshots/` directory contains evidence of the ready harness, ready Gateway target, `create_bug_report` tool schema, and deployed Lambda application.
+
 There are a number of resources available to you to develop this application:
 
 * `create_bug_report` — a tool (Lambda function) that creates a ticket in a database, exposed to your chatbot through an **AgentCore Gateway**
